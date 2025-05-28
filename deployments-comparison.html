@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Deployment Comparison Tool</title>
+  <!-- Bootstrap CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+  <!-- js-yaml for YAML parsing -->
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+</head>
+<style>
+  .accordion-header,
+  .accordion-button {
+    display: flex;
+    align-items: center;
+  }
+
+  .accordion-button::after {
+    display: inline-flex;
+    align-items: center;
+    margin-top: 0;
+  }
+
+  .accordion-header .form-check-input,
+  .accordion-header .btn.btn-sm {
+    align-self: center;
+    margin-left: 0.5rem;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+  }
+</style>
+<body>
+  <div class="container my-5">
+    <h1 class="mb-4 text-center">Deployment Comparison Tool</h1>
+    <div class="form-check form-switch mb-3">
+      <input class="form-check-input" type="checkbox" id="sessionSwitch" checked>
+      <label class="form-check-label" for="sessionSwitch">
+        <span id="sessionLabel"></span>
+      </label>
+    </div>
+    <div class="mb-3">
+      <textarea id="textInput" class="form-control" rows="15" placeholder="Paste the Deployment YAML here..."></textarea>
+    </div>
+    <div class="d-flex justify-content-center mb-4">
+      <button id="generateBtn" class="btn btn-primary">Add deployment</button>
+      <button id="compareGlobal" class="btn btn-secondary ms-2" disabled>
+        <i class="bi bi-arrow-left-right"></i> Compare
+      </button>
+    </div>
+	<div class="accordion" id="deploymentSections">
+
+	  <div class="accordion-item">
+		<h2 class="accordion-header" id="headingBeforeDeployment">
+		  <button class="accordion-button" type="button"
+				  data-bs-toggle="collapse"
+				  data-bs-target="#collapseBeforeDeployment"
+				  aria-expanded="true"
+				  aria-controls="collapseBeforeDeployment">
+			Before Deployment
+		  </button>
+		</h2>
+		<div id="collapseBeforeDeployment"
+			 class="accordion-collapse collapse show"
+			 aria-labelledby="headingBeforeDeployment">
+		  <div class="accordion-body p-0">
+			<div id="beforeAccordion" class="accordion mb-5"></div>
+		  </div>
+		</div>
+	  </div>
+
+	  <div class="accordion-item">
+		<h2 class="accordion-header" id="headingAfterDeployment">
+		  <button class="accordion-button collapsed" type="button"
+				  data-bs-toggle="collapse"
+				  data-bs-target="#collapseAfterDeployment"
+				  aria-expanded="false"
+				  aria-controls="collapseAfterDeployment">
+			After Deployment
+		  </button>
+		</h2>
+		<div id="collapseAfterDeployment"
+			 class="accordion-collapse collapse show"
+			 aria-labelledby="headingAfterDeployment">
+		  <div class="accordion-body p-0">
+			<div id="afterAccordion" class="accordion"></div>
+		  </div>
+		</div>
+	  </div>
+
+	</div>
+  </div>
+
+  <!-- Bootstrap JS Bundle -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    let cardCount = 0;
+    let selectedBefore = null;
+    let selectedAfter = null;
+
+    const sessionSwitch = document.getElementById('sessionSwitch');
+    const sessionLabel  = document.getElementById('sessionLabel');
+    const generateBtn = document.getElementById('generateBtn');
+    const compareGlobal = document.getElementById('compareGlobal');
+
+    function updateSessionLabel() {
+      sessionLabel.textContent = sessionSwitch.checked
+        ? 'Add to "Before" Session'
+        : 'Add to "After" Session';
+    }
+
+    updateSessionLabel();
+    sessionSwitch.addEventListener('change', updateSessionLabel);
+
+    function unionEnv(env1, env2) {
+      const keys1 = env1.map(e => e.name);
+      const keys2 = env2.map(e => e.name);
+      return Array.from(new Set([...keys1, ...keys2])).sort();
+    }
+    
+    function unionRes(res1, res2) {
+      return Array.from(new Set([...Object.keys(res1), ...Object.keys(res2)])).sort();
+    }
+    
+	function onCompareClick() {
+	  if (selectedBefore && selectedAfter) {
+		const beforeName = selectedBefore
+		  .querySelector('.accordion-button')
+		  .textContent.trim();
+		const afterName = selectedAfter
+		  .querySelector('.accordion-button')
+		  .textContent.trim();
+
+		const beforeEnv  = JSON.parse(selectedBefore.dataset.env);
+		const beforeRes  = JSON.parse(selectedBefore.dataset.resources);
+		const afterEnv   = JSON.parse(selectedAfter.dataset.env);
+		const afterRes   = JSON.parse(selectedAfter.dataset.resources);
+
+		showComparisonModal(
+		  { name: beforeName,  env: beforeEnv,  resources: beforeRes  },
+		  { name: afterName,   env: afterEnv,   resources: afterRes   }
+		);
+	  }
+	}
+
+    function showComparisonModal(before, after) {
+      const prev = document.getElementById('compareModal');
+      if (prev) prev.remove();
+      const envKeys = unionEnv(before.env, after.env).filter(key => {
+        const bVal = before.env.find(e=>e.name===key)?.value || '';
+        const aVal = after.env.find(e=>e.name===key)?.value || '';
+        return bVal !== aVal;
+      });
+      const resKeys = unionRes(before.resources, after.resources).filter(key => {
+        const bVal = JSON.stringify(before.resources[key] || {});
+        const aVal = JSON.stringify(after.resources[key] || {});
+        return bVal !== aVal;
+      });
+      let bodyContent = '';
+      if (envKeys.length) {
+        bodyContent += '<h6>Environment Changes</h6>';
+        bodyContent += '<table class="table table-sm"><thead><tr><th>Variable</th><th>Before</th><th>After</th></tr></thead><tbody>';
+        bodyContent += envKeys.map(key => {
+          const bVal = before.env.find(e=>e.name===key)?.value || '';
+          const aVal = after.env.find(e=>e.name===key)?.value || '';
+          return `<tr><td>${key}</td><td>${bVal}</td><td>${aVal}</td></tr>`;
+        }).join('');
+        bodyContent += '</tbody></table>';
+      } else {
+        bodyContent += '<p>No environment changes.</p>';
+      }
+      if (resKeys.length) {
+        bodyContent += '<h6>Resource Changes</h6>';
+        bodyContent += '<table class="table table-sm"><thead><tr><th>Resource</th><th>Before</th><th>After</th></tr></thead><tbody>';
+        bodyContent += resKeys.map(key => {
+          const bRaw = before.resources[key] || {};
+          const aRaw = after.resources[key] || {};
+          const bVal = JSON.stringify(bRaw, null, 2);
+          const aVal = JSON.stringify(aRaw, null, 2);
+          return `<tr><td>${key}</td><td><pre class="m-0">${bVal}</pre></td><td><pre class="m-0">${aVal}</pre></td></tr>`;
+        }).join('');
+        bodyContent += '</tbody></table>';
+      } else {
+        bodyContent += '<p>No resource changes.</p>';
+      }
+      const modalHtml = `
+      <div class="modal fade" id="compareModal" tabindex="-1" aria-labelledby="compareModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title" id="compareModalLabel">Comparison: ${before.name}</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              ${bodyContent}
+            </div>
+          </div>
+        </div>
+      </div>`;
+      document.body.insertAdjacentHTML('beforeend', modalHtml);
+      const modalEl = document.getElementById('compareModal');
+      const modal = new bootstrap.Modal(modalEl);
+      modal.show();
+    }
+
+    function updateCompareButton() {
+      compareGlobal.disabled = !(selectedBefore && selectedAfter);
+      compareGlobal.classList.toggle('btn-primary', !compareGlobal.disabled);
+      compareGlobal.classList.toggle('btn-secondary', compareGlobal.disabled);
+    }
+
+function handleCheckboxChange(e) {
+  const checkbox = e.target;
+  const item = checkbox.closest('.accordion-item');
+  const session = checkbox.dataset.session;
+
+  if (checkbox.checked) {
+    const prev = session === 'before' ? selectedBefore : selectedAfter;
+    if (prev && prev !== item) {
+      prev.querySelector('input[type="checkbox"]').checked = false;
+    }
+    if (session === 'before')
+		selectedBefore = item;
+    else
+		selectedAfter = item;
+
+    const name = item.querySelector('.accordion-button').textContent.trim();
+    const otherSession = session === 'before' ? 'after' : 'before';
+    const otherContainer = document.getElementById(`${otherSession}Accordion`);
+    const matchItem = Array.from(otherContainer.querySelectorAll('.accordion-item'))
+      .find(i => i.querySelector('.accordion-button').textContent.trim() === name);
+    if (matchItem) {
+	  const otherPrev = session === 'before' ? selectedAfter : selectedBefore;
+      if (otherPrev && otherPrev !== matchItem) {
+        otherPrev.querySelector('input[type="checkbox"]').checked = false;
+        if (session === 'before')
+		  selectedAfter = null;
+        else
+		  selectedBefore = null;
+      }
+  
+      const otherCheckbox = matchItem.querySelector('input[type="checkbox"]');
+      if (!otherCheckbox.checked) {
+        otherCheckbox.checked = true;
+        if (otherSession === 'before') selectedBefore = matchItem;
+        else selectedAfter = matchItem;
+      }
+    }
+  } else {
+    const name = item.querySelector('.accordion-button').textContent.trim();
+    const otherSession = session === 'before' ? 'after' : 'before';
+    const otherContainer = document.getElementById(`${otherSession}Accordion`);
+    const matchItem = Array.from(otherContainer.querySelectorAll('.accordion-item'))
+      .find(i => i.querySelector('.accordion-button').textContent.trim() === name);
+    if (matchItem) {
+      const otherCheckbox = matchItem.querySelector('input[type="checkbox"]');
+      if (otherCheckbox.checked) {
+        otherCheckbox.checked = false;
+        if (otherSession === 'before') selectedBefore = null;
+        else selectedAfter = null;
+      }
+    }
+	
+    if (session === 'before' && selectedBefore === item) {
+      selectedBefore = null;
+    } else if (session === 'after' && selectedAfter === item) {
+      selectedAfter = null;
+    }
+  }
+
+  updateCompareButton();
+}
+
+    function createCard(deployment, session) {
+      const name = deployment.metadata?.name || 'No name';
+      const containerSpec = deployment.spec?.template?.spec?.containers?.[0] || {};
+      let env = Array.isArray(containerSpec.env) ? containerSpec.env : [];
+      const resources = containerSpec.resources || {};
+      env = env.slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      const sortedRes = Object.keys(resources).sort().reduce((acc, key) => { acc[key] = resources[key]; return acc; }, {});
+
+      const containerEl = document.getElementById(session === 'before' ? 'beforeAccordion' : 'afterAccordion');
+      const exists = Array.from(containerEl.querySelectorAll('.accordion-button')).some(btn => btn.textContent === name);
+      if (exists) {
+        if (!confirm(`A card named "${name}" already exists in the ${session === 'before' ? 'Before' : 'After'} session. Do you still want to add it?`)) return;
+      }
+
+      cardCount++;
+      const id = `${session}-card-${cardCount}`;
+      const item = document.createElement('div');
+      item.className = 'accordion-item mb-2 shadow-sm';
+      item.dataset.env = JSON.stringify(env);
+      item.dataset.resources = JSON.stringify(sortedRes);
+
+      const header = document.createElement('h2');
+      header.className = 'accordion-header d-flex justify-content-between align-items-center';
+      header.id = `heading-${id}`;
+
+      const titleBtn = document.createElement('button');
+      titleBtn.className = 'accordion-button collapsed flex-grow-1';
+      titleBtn.type = 'button';
+      titleBtn.setAttribute('data-bs-toggle', 'collapse');
+      titleBtn.setAttribute('data-bs-target', `#collapse-${id}`);
+      titleBtn.setAttribute('aria-expanded', 'false');
+      titleBtn.setAttribute('aria-controls', `collapse-${id}`);
+      titleBtn.textContent = name;
+      header.appendChild(titleBtn);
+
+      const actionGroup = document.createElement('div');
+      actionGroup.className = 'd-flex align-items-center';
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = 'form-check-input me-2';
+      checkbox.dataset.session = session;
+      checkbox.addEventListener('change', handleCheckboxChange);
+      actionGroup.appendChild(checkbox);
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'btn btn-sm btn-outline-danger';
+      deleteBtn.innerHTML = '<i class="bi bi-trash"></i>';
+      deleteBtn.setAttribute('aria-label', 'Remove');
+      deleteBtn.addEventListener('click', () => item.remove());
+      actionGroup.appendChild(deleteBtn);
+
+      header.appendChild(actionGroup);
+      item.appendChild(header);
+
+      const collapse = document.createElement('div');
+      collapse.id = `collapse-${id}`;
+      collapse.className = 'accordion-collapse collapse';
+      collapse.setAttribute('aria-labelledby', `heading-${id}`);
+      collapse.setAttribute('data-bs-parent', `#${session}Accordion`);
+
+      const body = document.createElement('div');
+      body.className = 'accordion-body';
+
+      const envSec = document.createElement('div');
+      envSec.innerHTML = '<h6>Environment Variables:</h6>';
+      const ul = document.createElement('ul');
+      ul.className = 'list-group list-group-flush mb-3';
+      env.forEach(e => {
+        const li = document.createElement('li'); li.className = 'list-group-item p-1';
+        li.textContent = `${e.name} = ${e.value || ''}`;
+        ul.appendChild(li);
+      });
+      envSec.appendChild(ul);
+      body.appendChild(envSec);
+
+      const resSec = document.createElement('div');
+      resSec.innerHTML = '<h6>Resources:</h6>';
+      const pre = document.createElement('pre');
+      pre.className = 'small'; pre.textContent = JSON.stringify(sortedRes, null, 2);
+      resSec.appendChild(pre);
+      body.appendChild(resSec);
+
+      collapse.appendChild(body);
+      item.appendChild(collapse);
+      containerEl.appendChild(item);
+    }
+
+    generateBtn.addEventListener('click', () => {
+      const text = document.getElementById('textInput').value;
+      if (!text.trim()) {
+        alert('Paste the deployment YAML to generate cards.');
+        return;
+      }
+      try {
+        const docs = jsyaml.loadAll(text);
+        const session = sessionSwitch.checked ? 'before' : 'after';
+        docs.forEach(doc => doc?.kind === 'Deployment' && createCard(doc, session));
+      } catch (e) {
+        console.error('Error parsing YAML:', e);
+        alert('Error parsing YAML. Please check the syntax.');
+      }
+    });
+
+    compareGlobal.addEventListener('click', onCompareClick);
+  </script>
+</body>
+</html>
