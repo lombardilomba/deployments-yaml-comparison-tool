@@ -322,7 +322,22 @@ function handleCheckboxChange(e) {
       deleteBtn.className = 'btn btn-sm btn-outline-danger';
       deleteBtn.innerHTML = '<i class="bi bi-trash"></i>';
       deleteBtn.setAttribute('aria-label', 'Remove');
-      deleteBtn.addEventListener('click', () => item.remove());
+      deleteBtn.addEventListener('click', () => {
+        const checkbox = item.querySelector('input[type="checkbox"]');
+        const session  = checkbox.dataset.session;
+
+        if (session === 'before' && selectedBefore === item) {
+          selectedBefore = null;
+          checkbox.checked = false;
+        } else if (session === 'after' && selectedAfter === item) {
+          selectedAfter = null;
+          checkbox.checked = false;
+        }
+
+        updateCompareButton();
+
+        item.remove();
+      });
       actionGroup.appendChild(deleteBtn);
 
       header.appendChild(actionGroup);
